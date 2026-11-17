@@ -130,7 +130,7 @@ def parse_boe_xml(path: Path) -> list[dict]:
             if len(body.split()) < 8 or re.fullmatch(r".{0,80}\(?(derogad[oa]|suprimid[oa])\)?\.?", body, re.I):
                 continue
             articles.append({
-                "location": block.get("titulo") or paras[0][:60],
+                "location": _clean(block.get("titulo") or paras[0][:60]),
                 "section": " > ".join(section_stack.values()),
                 "paragraphs": paras,
             })
@@ -299,8 +299,15 @@ def embed_and_store(chunks: list[dict], design: str | None = None) -> dict:
         print(f"  stored {i + len(batch)}/{len(todo)} new chunks ({design})", file=sys.stderr)
         if i + EMBED_BATCH < len(todo):
             time.sleep(35)   # stay under the per-minute limit (~100 texts/min on the free tier)
-    return {"new": len(todo), "existing": len(chunks) - len(todo)}
-
+    # Re-indexing a source replaces it: drop stored chunks of these sources that the
+    # current text no longer produces (an edited document, or a fixed location label).
+    keep = {c["id"] for c in chunks}
+    stale = []
+    for source in {c["meta"]["source"] for c in chunks}:
+        stale += [i for i in col.get(where={"source": source}, include=[])["ids"] if i not in keep]
+    if stale:
+        col.delete(ids=stale)
+    return {"new": len(todo), "existing": len(chunks) - len(todo), "removed": len(stale)}
 
 # --------------------------------------------------------------------- main
 
